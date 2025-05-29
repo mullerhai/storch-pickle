@@ -1,13 +1,11 @@
 package torch.pickle
 
 import java.util
+
 import scala.collection.immutable.HashMap
 
-/**
- * Exception thrown that represents a certain Python exception.
- *
- * 
- */
+/** Exception thrown that represents a certain Python exception.
+  */
 @SerialVersionUID(4884843316742683086L)
 class PythonException extends RuntimeException {
   var _pyroTraceback: String = null
@@ -15,39 +13,41 @@ class PythonException extends RuntimeException {
 
   def this(message: String, cause: Throwable) = {
     this()
-    RuntimeException (message, cause)
+    RuntimeException(message, cause)
   }
 
   def this(message: String) = {
     this()
-    RuntimeException (message)
+    RuntimeException(message)
   }
 
   def this(cause: Throwable) = {
     this()
-    RuntimeException (cause)
+    RuntimeException(cause)
   }
 
   // special constructor for UnicodeDecodeError
-  def this(encoding: String, data: Array[Byte], i1: Integer, i2: Integer, message: String)= {
+  def this(
+      encoding: String,
+      data: Array[Byte],
+      i1: Integer,
+      i2: Integer,
+      message: String,
+  ) = {
     this()
-    RuntimeException ("UnicodeDecodeError: " + encoding + ": " + message)
+    RuntimeException("UnicodeDecodeError: " + encoding + ": " + message)
   }
 
-  /**
-   * called by the unpickler to restore state
-   */
+  /** called by the unpickler to restore state
+    */
   def __setstate__(args: HashMap[String, AnyRef]): Unit = {
     val tb = args.get("_pyroTraceback")
     // if the traceback is a list of strings, create one string from it
     if (tb.isInstanceOf[Seq[?]]) {
       val sb = new StringBuilder
-      
-      for (line <- tb.asInstanceOf[Seq[?]]) {
-        sb.append(line)
-      }
+
+      for (line <- tb.asInstanceOf[Seq[?]]) sb.append(line)
       _pyroTraceback = sb.toString
-    }
-    else _pyroTraceback = tb.asInstanceOf[String]
+    } else _pyroTraceback = tb.asInstanceOf[String]
   }
 }

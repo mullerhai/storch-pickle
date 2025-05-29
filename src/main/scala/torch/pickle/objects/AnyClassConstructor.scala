@@ -1,42 +1,15 @@
 package torch.pickle.objects
 
-import torch.pickle.IObjectConstructor
-import torch.pickle.PickleException
 import java.lang.reflect.Constructor
 import java.math.BigDecimal
 
-/**
- * This object constructor uses reflection to create instances of any given class.
- *
- * 
- */
-//class AnyClassConstructors(private val types: Class[?]) extends IObjectConstructor {
-//  override def construct(args: Array[AnyRef]): AnyRef = try {
-//    val paramtypes = new Array[Class[?]](args.length)
-//    for (i <- 0 until args.length) {
-//      paramtypes(i) = args(i).getClass
-//    }
-//    val cons = types.getConstructor(paramtypes)
-//    // special case BigDecimal("NaN") which is not supported in Java, return this as Double.NaN
-//    if ((types eq classOf[BigDecimal]) && args.length == 1) {
-//      val nan = args(0).asInstanceOf[String]
-//      if (nan.equalsIgnoreCase("nan")) return java.lang.Double.NaN
-//    }
-//    cons.newInstance(args)
-//  } catch {
-//    case x: Exception =>
-//      throw new PickleException("problem construction object: " + x)
-//  }
-//}
-
-import java.lang.reflect.Constructor
+import torch.pickle.IObjectConstructor
+import torch.pickle.PickleException
 //import java.math.BigDecimal
 
-/**
- * This object constructor uses reflection to create instances of any given class.
- *
- 
- */
+/** This object constructor uses reflection to create instances of any given
+  * class.
+  */
 class AnyClassConstructor(val types: Class[?]) extends IObjectConstructor:
 
   override def construct(args: Array[AnyRef]): AnyRef =

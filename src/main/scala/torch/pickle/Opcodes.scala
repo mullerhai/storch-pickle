@@ -1,9 +1,7 @@
 package torch.pickle
 
-/**
- * Pickle opcodes. Taken from Python's stdlib pickle.py.
- *
- */
+/** Pickle opcodes. Taken from Python's stdlib pickle.py.
+  */
 object Opcodes { // protocol 0 and 1
   // Pickle opcodes. See pickletools.py for extensive docs. The listing
   // here is in kind-of alphabetical order of 1-character pickle code.
@@ -26,9 +24,9 @@ object Opcodes { // protocol 0 and 1
   val REDUCE = 'R' // apply callable to argtuple, both on stack
   val STRING = 'S' // push string; NL-terminated string argument
   val BINSTRING = 'T' // push string; counted binary string argument
-  val SHORT_BINSTRING = 'U' //push string; counted binary string < 256 bytes
+  val SHORT_BINSTRING = 'U' // push string; counted binary string < 256 bytes
   val UNICODE = 'V' // push Unicode string; raw-unicode-escaped'd argument
-  val BINUNICODE = 'X' //push Unicode string; counted UTF-8 string argument
+  val BINUNICODE = 'X' // push Unicode string; counted UTF-8 string argument
   val APPEND = 'a' // append stack top to list below it
   val BUILD = 'b' // call __setstate__ or __dict__.update()
   val GLOBAL = 'c' // push self.find_class(modname, name); 2 string args
@@ -43,7 +41,7 @@ object Opcodes { // protocol 0 and 1
   val EMPTY_LIST = ']' // push empty list
   val OBJ = 'o' // build & push class instance
   val PUT = 'p' // store stack top in memo; index is string arg
-  val BINPUT = 'q' //store stack top in memo; index is 1-byte arg
+  val BINPUT = 'q' // store stack top in memo; index is 1-byte arg
   val LONG_BINPUT = 'r' // store stack top in memo; index is 4-byte arg
   val SETITEM = 's' // add key+value pair to dict
   val TUPLE = 't' // build tuple from topmost stack items

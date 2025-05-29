@@ -2,26 +2,29 @@ package torch.pickle.objects
 
 import java.io.Serializable
 
-/**
- * An immutable Complex Number class.
- *
- * 
- */
+/** An immutable Complex Number class.
+  */
 @SerialVersionUID(4668080260997226513L)
 object ComplexNumber {
-  def add(c1: ComplexNumber, c2: ComplexNumber) = new ComplexNumber(c1.r + c2.r, c1.i + c2.i)
+  def add(c1: ComplexNumber, c2: ComplexNumber) =
+    new ComplexNumber(c1.r + c2.r, c1.i + c2.i)
 
-  def subtract(c1: ComplexNumber, c2: ComplexNumber) = new ComplexNumber(c1.r - c2.r, c1.i - c2.i)
+  def subtract(c1: ComplexNumber, c2: ComplexNumber) =
+    new ComplexNumber(c1.r - c2.r, c1.i - c2.i)
 
-  def multiply(c1: ComplexNumber, c2: ComplexNumber) = new ComplexNumber(c1.r * c2.r - c1.i * c2.i, c1.r * c2.i + c1.i * c2.r)
+  def multiply(c1: ComplexNumber, c2: ComplexNumber) =
+    new ComplexNumber(c1.r * c2.r - c1.i * c2.i, c1.r * c2.i + c1.i * c2.r)
 
-  def divide(c1: ComplexNumber, c2: ComplexNumber) = new ComplexNumber((c1.r * c2.r + c1.i * c2.i) / (c2.r * c2.r + c2.i * c2.i), (c1.i * c2.r - c1.r * c2.i) / (c2.r * c2.r + c2.i * c2.i))
+  def divide(c1: ComplexNumber, c2: ComplexNumber) = new ComplexNumber(
+    (c1.r * c2.r + c1.i * c2.i) / (c2.r * c2.r + c2.i * c2.i),
+    (c1.i * c2.r - c1.r * c2.i) / (c2.r * c2.r + c2.i * c2.i),
+  )
 }
 
 @SerialVersionUID(4668080260997226513L)
 class ComplexNumber extends Serializable {
-  final private var r = .0 // real
-  final private var i = .0 // imaginary
+  private final var r = .0 // real
+  private final var i = .0 // imaginary
 
 //  def this(rr: Double, ii: Double) ={
 //    this()
@@ -29,7 +32,7 @@ class ComplexNumber extends Serializable {
 //    i = ii
 //  }
 //
-  def this(rr: Double, ii: Double) ={
+  def this(rr: Double, ii: Double) = {
     this()
     r = rr
     i = ii
@@ -49,9 +52,11 @@ class ComplexNumber extends Serializable {
 
   def add(other: ComplexNumber): ComplexNumber = ComplexNumber.add(this, other)
 
-  def subtract(other: ComplexNumber): ComplexNumber = ComplexNumber.subtract(this, other)
+  def subtract(other: ComplexNumber): ComplexNumber = ComplexNumber
+    .subtract(this, other)
 
-  def multiply(other: ComplexNumber): ComplexNumber = ComplexNumber.multiply(this, other)
+  def multiply(other: ComplexNumber): ComplexNumber = ComplexNumber
+    .multiply(this, other)
 
   override def equals(o: Any): Boolean = {
     if (!o.isInstanceOf[ComplexNumber]) return false
@@ -59,5 +64,6 @@ class ComplexNumber extends Serializable {
     r == other.r && i == other.i
   }
 
-  override def hashCode: Int = java.lang.Double.valueOf(r).hashCode ^ java.lang.Double.valueOf(i).hashCode
+  override def hashCode: Int = java.lang.Double.valueOf(r).hashCode ^
+    java.lang.Double.valueOf(i).hashCode
 }

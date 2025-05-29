@@ -1,8 +1,5 @@
 package torch.pickle
 
-import torch.pickle.objects.ArrayConstructor
-import torch.pickle.objects.*
-
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -10,40 +7,52 @@ import java.lang.reflect.Method
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.util.*
+
 import scala.collection.mutable
-import scala.collection.mutable.{HashMap, ListBuffer}
-import scala.util.control.Breaks.{break, breakable}
+import scala.collection.mutable.HashMap
+import scala.collection.mutable.ListBuffer
+import scala.util.control.Breaks.break
+import scala.util.control.Breaks.breakable
 
-/**
- * Unpickles an object graph from a pickle data inputstream. Supports all pickle protocol versions.
- * Maps the python objects on the corresponding java equivalents or similar types.
- * This class is NOT threadsafe! (Don't use the same pickler from different threads)
- *
- * See the README.txt for a table of the type mappings.
- *
- * 
- */
+import torch.pickle.objects.*
+import torch.pickle.objects.ArrayConstructor
+
+/** Unpickles an object graph from a pickle data inputstream. Supports all
+  * pickle protocol versions. Maps the python objects on the corresponding java
+  * equivalents or similar types. This class is NOT threadsafe! (Don't use the
+  * same pickler from different threads)
+  *
+  * See the README.txt for a table of the type mappings.
+  */
 object Unpickler {
-  /**
-   * Used as return value for {@link Unpickler# dispatch} in the general case (because the object graph is built on the stack)
-   */
-  val NO_RETURN_VALUE = new AnyRef
-  /**
-   * Registry of object constructors that are used to create the appropriate Java objects for the given Python module.typename references.
-   */
-  var objectConstructors: mutable.HashMap[String, IObjectConstructor] = new mutable.HashMap[String, IObjectConstructor]
 
-  /**
-   * Register additional object constructors for custom classes.
-   */
-  def registerConstructor(module: String, classname: String, constructor: IObjectConstructor): Unit = {
-    objectConstructors.put(module + "." + classname, constructor)
-  }
+  /** Used as return value for {@link Unpickler# dispatch} in the general case
+    * (because the object graph is built on the stack)
+    */
+  val NO_RETURN_VALUE = new AnyRef
+
+  /** Registry of object constructors that are used to create the appropriate
+    * Java objects for the given Python module.typename references.
+    */
+  var objectConstructors: mutable.HashMap[String, IObjectConstructor] =
+    new mutable.HashMap[String, IObjectConstructor]
+
+  /** Register additional object constructors for custom classes.
+    */
+  def registerConstructor(
+      module: String,
+      classname: String,
+      constructor: IObjectConstructor,
+  ): Unit = objectConstructors.put(module + "." + classname, constructor)
 
 //  try objectConstructors = new util.HashMap[String, IObjectConstructor]
-  objectConstructors.put("__builtin__.complex", new AnyClassConstructor(classOf[ComplexNumber]))
-  objectConstructors.put("builtins.complex", new AnyClassConstructor(classOf[ComplexNumber]))
+  objectConstructors
+    .put("__builtin__.complex", new AnyClassConstructor(classOf[ComplexNumber]))
+  objectConstructors
+    .put("builtins.complex", new AnyClassConstructor(classOf[ComplexNumber]))
   objectConstructors.put("array.array", new ArrayConstructor)
   objectConstructors.put("array._array_reconstructor", new ArrayConstructor)
   objectConstructors.put("__builtin__.bytearray", new ByteArrayConstructor)
@@ -51,62 +60,108 @@ object Unpickler {
   objectConstructors.put("__builtin__.bytes", new ByteArrayConstructor)
   objectConstructors.put("__builtin__.set", new SetConstructor)
   objectConstructors.put("builtins.set", new SetConstructor)
-  objectConstructors.put("datetime.datetime", new DateTimeConstructor(DateTimeConstructor.DATETIME))
-  objectConstructors.put("datetime.time", new DateTimeConstructor(DateTimeConstructor.TIME))
-  objectConstructors.put("datetime.date", new DateTimeConstructor(DateTimeConstructor.DATE))
-  objectConstructors.put("datetime.timedelta", new DateTimeConstructor(DateTimeConstructor.TIMEDELTA))
-  objectConstructors.put("pytz._UTC", new TimeZoneConstructor(TimeZoneConstructor.UTC))
-  objectConstructors.put("pytz._p", new TimeZoneConstructor(TimeZoneConstructor.PYTZ))
-  objectConstructors.put("pytz.timezone", new TimeZoneConstructor(TimeZoneConstructor.PYTZ))
-  objectConstructors.put("dateutil.tz.tzutc", new TimeZoneConstructor(TimeZoneConstructor.DATEUTIL_TZUTC))
-  objectConstructors.put("dateutil.tz.tzfile", new TimeZoneConstructor(TimeZoneConstructor.DATEUTIL_TZFILE))
-  objectConstructors.put("dateutil.zoneinfo.gettz", new TimeZoneConstructor(TimeZoneConstructor.DATEUTIL_GETTZ))
-  objectConstructors.put("datetime.tzinfo", new TimeZoneConstructor(TimeZoneConstructor.TZINFO))
-  objectConstructors.put("decimal.Decimal", new AnyClassConstructor(classOf[BigDecimal]))
+  objectConstructors.put(
+    "datetime.datetime",
+    new DateTimeConstructor(DateTimeConstructor.DATETIME),
+  )
+  objectConstructors
+    .put("datetime.time", new DateTimeConstructor(DateTimeConstructor.TIME))
+  objectConstructors
+    .put("datetime.date", new DateTimeConstructor(DateTimeConstructor.DATE))
+  objectConstructors.put(
+    "datetime.timedelta",
+    new DateTimeConstructor(DateTimeConstructor.TIMEDELTA),
+  )
+  objectConstructors
+    .put("pytz._UTC", new TimeZoneConstructor(TimeZoneConstructor.UTC))
+  objectConstructors
+    .put("pytz._p", new TimeZoneConstructor(TimeZoneConstructor.PYTZ))
+  objectConstructors
+    .put("pytz.timezone", new TimeZoneConstructor(TimeZoneConstructor.PYTZ))
+  objectConstructors.put(
+    "dateutil.tz.tzutc",
+    new TimeZoneConstructor(TimeZoneConstructor.DATEUTIL_TZUTC),
+  )
+  objectConstructors.put(
+    "dateutil.tz.tzfile",
+    new TimeZoneConstructor(TimeZoneConstructor.DATEUTIL_TZFILE),
+  )
+  objectConstructors.put(
+    "dateutil.zoneinfo.gettz",
+    new TimeZoneConstructor(TimeZoneConstructor.DATEUTIL_GETTZ),
+  )
+  objectConstructors
+    .put("datetime.tzinfo", new TimeZoneConstructor(TimeZoneConstructor.TZINFO))
+  objectConstructors
+    .put("decimal.Decimal", new AnyClassConstructor(classOf[BigDecimal]))
   objectConstructors.put("copy_reg._reconstructor", new Reconstructor)
-  objectConstructors.put("operator.attrgetter", new OperatorAttrGetterForCalendarTz)
+  objectConstructors
+    .put("operator.attrgetter", new OperatorAttrGetterForCalendarTz)
   objectConstructors.put("_codecs.encode", new ByteArrayConstructor) // we're lucky, the bytearray constructor is also able to mimic codecs.encode()
 }
 
 class Unpickler {
 //  memo = new HashMap[Int, AnyRef]
-  /**
-   * The highest Python Pickle protocol version supported by this library.
-   */
-  final protected val HIGHEST_PROTOCOL = 5
-  /**
-   * Internal cache of memoized objects.
-   */
+  /** The highest Python Pickle protocol version supported by this library.
+    */
+  protected final val HIGHEST_PROTOCOL = 5
+
+  /** Internal cache of memoized objects.
+    */
   protected var memo: mutable.HashMap[Int, Any] = new mutable.HashMap[Int, Any]()
-  /**
-   * The stack that is used for building the resulting object graph.
-   */
-  protected var stack: UnpickleStack = new UnpickleStack //ListBuffer[AnyRef]()
-  /**
-   * The stream where the pickle data is read from.
-   */
+
+  /** The stack that is used for building the resulting object graph.
+    */
+  protected var stack: UnpickleStack = new UnpickleStack // ListBuffer[AnyRef]()
+  /** The stream where the pickle data is read from.
+    */
   protected var input: InputStream = null
 
-  /**
-   * Read a pickled object representation from the given input stream.
-   *
-   * @return the reconstituted object hierarchy specified in the file.
-   */
+  @throws[PickleException]
+  @throws[IOException]
+  def load(filePath: String): Any = {
+    val path = Paths.get(filePath)
+    val stream = Files.newInputStream(path)
+    this.load(stream)
+  }
+
+  /** Read a pickled object representation from the given input stream.
+    *
+    * @return
+    *   the reconstituted object hierarchy specified in the file.
+    */
   @throws[PickleException]
   @throws[IOException]
   def load(stream: InputStream): Any =
+//    val stack = new UnpickleStack()
+//    val bytes = stream.readNBytes(128)
     input = stream
-    try
-      while true do
-        val key = PickleUtils.readbyte(input)
-        if key == -1 then
-          throw new IOException("premature end of file")
-        val value = dispatch(key)
-        if value != Unpickler.NO_RETURN_VALUE then
-          return value
-    finally
-      close()
-      
+    var key: Short = -1
+    try breakable(
+        while ({ key = PickleUtils.readbyte(input); key != -1 }) {
+          val value = dispatch(key)
+          println(s"get key: $key value: $value stack: ${stack
+              .size()} Unpickler.NO_RETURN_VALUE ${Unpickler.NO_RETURN_VALUE}")
+          if (stack.size() == 6) println(stack)
+          if value != Unpickler.NO_RETURN_VALUE then return value
+        },
+//        while true do
+//          val key = PickleUtils.readbyte(stream)
+//          println(s"stream read byte key ${key}")
+//
+//          if key == -1 then {
+//            break()
+////            throw new IOException("premature end of file, stream read maybe failed ,please check")
+//          }
+//          val value = dispatch(key)
+//          println(s"get value ${value}")
+//          if value != Unpickler.NO_RETURN_VALUE then
+//            return value
+      )
+
+    finally println("finally load all finish...")
+//      close()
+
 //  @throws[PickleException]
 //  @throws[IOException]
 //  def load(stream: InputStream): AnyRef = {
@@ -120,192 +175,263 @@ class Unpickler {
 //    }
 //  }
 
-  
-  /**
-   * Read a pickled object representation from the given pickle data bytes.
-   *
-   * @return the reconstituted object hierarchy specified in the file.
-   */
+  /** Read a pickled object representation from the given pickle data bytes.
+    *
+    * @return
+    *   the reconstituted object hierarchy specified in the file.
+    */
   @throws[PickleException]
   @throws[IOException]
-  def loads(pickledata: Array[Byte]): Any = load(new ByteArrayInputStream(pickledata))
+  def loads(pickledata: Array[Byte]): Any =
+    load(new ByteArrayInputStream(pickledata))
 
-  /**
-   * Close the unpickler and frees the resources such as the unpickle stack and memo table.
-   */
+  /** Close the unpickler and frees the resources such as the unpickle stack and
+    * memo table.
+    */
   def close(): Unit = {
+    println("try to close  stack and  memo  and input ...")
     if (stack != null) stack.clear()
     if (memo != null) memo.clear()
-    if (input != null) try input.close()
-    catch {
-      case ignored: IOException =>
-    }
+    if (input != null)
+      try input.close()
+      catch { case ignored: IOException => }
   }
 
-  /**
-   * Buffer support for protocol 5 out of band data
-   * If you want to unpickle such pickles, you'll have to subclass the unpickler
-   * and override this method to return the buffer data you want.
-   */
+  /** Buffer support for protocol 5 out of band data If you want to unpickle
+    * such pickles, you'll have to subclass the unpickler and override this
+    * method to return the buffer data you want.
+    */
   @throws[PickleException]
   @throws[IOException]
-  protected def next_buffer: AnyRef = throw new PickleException("pickle stream refers to out-of-band data but no user-overridden next_buffer() method is used\n")
+  protected def next_buffer: AnyRef = throw new PickleException(
+    "pickle stream refers to out-of-band data but no user-overridden next_buffer() method is used\n",
+  )
 
-  /**
-   * Process a single pickle stream opcode.
-   */
+  /** Process a single pickle stream opcode.
+    */
   @throws[PickleException]
   @throws[IOException]
-  protected def dispatch(key: Short): AnyRef = {
-    key match {
-      case Opcodes.MARK =>
-        load_mark()
-      case Opcodes.STOP =>
-        val value = stack.pop
-        stack.clear()
-        memo.clear()
-//        return value // final result value
-      case Opcodes.POP =>
-        load_pop()
-      case Opcodes.POP_MARK =>
-        load_pop_mark()
-      case Opcodes.DUP =>
-        load_dup()
-      case Opcodes.FLOAT =>
-        load_float()
-      case Opcodes.INT =>
-        load_int()
-      case Opcodes.BININT =>
-        load_binint()
-      case Opcodes.BININT1 =>
-        load_binint1()
-      case Opcodes.LONG =>
-        load_long()
-      case Opcodes.BININT2 =>
-        load_binint2()
-      case Opcodes.NONE =>
-        load_none()
-      case Opcodes.PERSID =>
-        load_persid()
-      case Opcodes.BINPERSID =>
-        load_binpersid()
-      case Opcodes.REDUCE =>
-        load_reduce()
-      case Opcodes.STRING =>
-        load_string()
-      case Opcodes.BINSTRING =>
-        load_binstring()
-      case Opcodes.SHORT_BINSTRING =>
-        load_short_binstring()
-      case Opcodes.UNICODE =>
-        load_unicode()
-      case Opcodes.BINUNICODE =>
-        load_binunicode()
-      case Opcodes.APPEND =>
-        load_append()
-      case Opcodes.BUILD =>
-        load_build()
-      case Opcodes.GLOBAL =>
-        load_global()
-      case Opcodes.DICT =>
-        load_dict()
-      case Opcodes.EMPTY_DICT =>
-        load_empty_dictionary()
-      case Opcodes.APPENDS =>
-        load_appends()
-      case Opcodes.GET =>
-        load_get()
-      case Opcodes.BINGET =>
-        load_binget()
-      case Opcodes.INST =>
-        load_inst()
-      case Opcodes.LONG_BINGET =>
-        load_long_binget()
-      case Opcodes.LIST =>
-        load_list()
-      case Opcodes.EMPTY_LIST =>
-        load_empty_list()
-      case Opcodes.OBJ =>
-        load_obj()
-      case Opcodes.PUT =>
-        load_put()
-      case Opcodes.BINPUT =>
-        load_binput()
-      case Opcodes.LONG_BINPUT =>
-        load_long_binput()
-      case Opcodes.SETITEM =>
-        load_setitem()
-      case Opcodes.TUPLE =>
-        load_tuple()
-      case Opcodes.EMPTY_TUPLE =>
-        load_empty_tuple()
-      case Opcodes.SETITEMS =>
-        load_setitems()
-      case Opcodes.BINFLOAT =>
-        load_binfloat()
+  protected def dispatch(key: Short): Any = {
+    breakable {
+      key match {
+        case Opcodes.MARK =>
+          load_mark()
+          break
+        case Opcodes.STOP =>
+          val value = stack.pop
+          println(s"try to stop all , value $value")
+          stack.clear()
+          memo.clear()
+          return value
+        //        return value // final result value
+        case Opcodes.POP =>
+          load_pop()
+          break
+        case Opcodes.POP_MARK =>
+          load_pop_mark()
+          break
+        case Opcodes.DUP =>
+          load_dup()
+          break
+        case Opcodes.FLOAT =>
+          load_float()
+          break
+        case Opcodes.INT =>
+          load_int()
+          break
+        case Opcodes.BININT =>
+          load_binint()
+          break
+        case Opcodes.BININT1 =>
+          load_binint1()
+          break
+        case Opcodes.LONG =>
+          load_long()
+          break
+        case Opcodes.BININT2 =>
+          load_binint2()
+          break
+        case Opcodes.NONE =>
+          load_none()
+          break
+        case Opcodes.PERSID =>
+          load_persid()
+          break
+        case Opcodes.BINPERSID =>
+          load_binpersid()
+          break
+        case Opcodes.REDUCE =>
+          load_reduce()
+          break
+        case Opcodes.STRING =>
+          load_string()
+          break
+        case Opcodes.BINSTRING =>
+          load_binstring()
+          break
+        case Opcodes.SHORT_BINSTRING =>
+          load_short_binstring()
+          break
+        case Opcodes.UNICODE =>
+          load_unicode()
+          break
+        case Opcodes.BINUNICODE =>
+          load_binunicode()
+          break
+        case Opcodes.APPEND =>
+          load_append()
+          break
+        case Opcodes.BUILD =>
+          load_build()
+          break
+        case Opcodes.GLOBAL =>
+          load_global()
+          break
+        case Opcodes.DICT =>
+          load_dict()
+          break
+        case Opcodes.EMPTY_DICT =>
+          load_empty_dictionary()
+          break
+        case Opcodes.APPENDS =>
+          load_appends()
+          break
+        case Opcodes.GET =>
+          load_get()
+          break
+        case Opcodes.BINGET =>
+          load_binget()
+          break
+        case Opcodes.INST =>
+          load_inst()
+          break
+        case Opcodes.LONG_BINGET =>
+          load_long_binget()
+          break
+        case Opcodes.LIST =>
+          load_list()
+          break
+        case Opcodes.EMPTY_LIST =>
+          load_empty_list()
+          break
+        case Opcodes.OBJ =>
+          load_obj()
+          break
+        case Opcodes.PUT =>
+          load_put()
+          break
+        case Opcodes.BINPUT =>
+          load_binput()
+          break
+        case Opcodes.LONG_BINPUT =>
+          load_long_binput()
+          break
+        case Opcodes.SETITEM =>
+          load_setitem()
+          break
+        case Opcodes.TUPLE =>
+          load_tuple()
+          break
+        case Opcodes.EMPTY_TUPLE =>
+          load_empty_tuple()
+          break
+        case Opcodes.SETITEMS =>
+          load_setitems()
+          break
+        case Opcodes.BINFLOAT =>
+          load_binfloat()
+          break
 
-      // protocol 2
-      case Opcodes.PROTO =>
-        load_proto()
-      case Opcodes.NEWOBJ =>
-        load_newobj()
-      case Opcodes.EXT1 =>
-      case Opcodes.EXT2 =>
-      case Opcodes.EXT4 =>
-        throw new PickleException("Unimplemented opcode EXT1/EXT2/EXT4 encountered. Don't use extension codes when pickling via copyreg.add_extension() to avoid this error.")
-      case Opcodes.TUPLE1 =>
-        load_tuple1()
-      case Opcodes.TUPLE2 =>
-        load_tuple2()
-      case Opcodes.TUPLE3 =>
-        load_tuple3()
-      case Opcodes.NEWTRUE =>
-        load_true()
-      case Opcodes.NEWFALSE =>
-        load_false()
-      case Opcodes.LONG1 =>
-        load_long1()
-      case Opcodes.LONG4 =>
-        load_long4()
+        // protocol 2
+        case Opcodes.PROTO =>
+          load_proto()
+          break
+        case Opcodes.NEWOBJ =>
+          load_newobj()
+          break
+        //      case Opcodes.EXT1 =>
+        //      case Opcodes.EXT2 =>
+        case Opcodes.EXT4 | Opcodes.EXT1 | Opcodes.EXT2 =>
+          throw new PickleException(
+            "Unimplemented opcode EXT1/EXT2/EXT4 encountered. Don't use extension codes when pickling via copyreg.add_extension() to avoid this error.",
+          )
+        case Opcodes.TUPLE1 =>
+          load_tuple1()
+          break
+        case Opcodes.TUPLE2 =>
+          load_tuple2()
+          break
+        case Opcodes.TUPLE3 =>
+          load_tuple3()
+          break
+        case Opcodes.NEWTRUE =>
+          load_true()
+          break
+        case Opcodes.NEWFALSE =>
+          load_false()
+          break
+        case Opcodes.LONG1 =>
+          load_long1()
+          break
+        case Opcodes.LONG4 =>
+          load_long4()
+          break
 
-      // Protocol 3 (Python 3.x)
-      case Opcodes.BINBYTES =>
-        load_binbytes()
-      case Opcodes.SHORT_BINBYTES =>
-        load_short_binbytes()
+        // Protocol 3 (Python 3.x)
+        case Opcodes.BINBYTES =>
+          load_binbytes()
+          break
+        case Opcodes.SHORT_BINBYTES =>
+          load_short_binbytes()
+          break
 
-      // Protocol 4 (Python 3.4-3.7)
-      case Opcodes.BINUNICODE8 =>
-        load_binunicode8()
-      case Opcodes.SHORT_BINUNICODE =>
-        load_short_binunicode()
-      case Opcodes.BINBYTES8 =>
-        load_binbytes8()
-      case Opcodes.EMPTY_SET =>
-        load_empty_set()
-      case Opcodes.ADDITEMS =>
-        load_additems()
-      case Opcodes.FROZENSET =>
-        load_frozenset()
-      case Opcodes.MEMOIZE =>
-        load_memoize()
-      case Opcodes.FRAME =>
-        load_frame()
-      case Opcodes.NEWOBJ_EX =>
-        load_newobj_ex()
-      case Opcodes.STACK_GLOBAL =>
-        load_stack_global()
+        // Protocol 4 (Python 3.4-3.7)
+        case Opcodes.BINUNICODE8 =>
+          load_binunicode8()
+          break
+        case Opcodes.SHORT_BINUNICODE =>
+          load_short_binunicode()
+          break
+        case Opcodes.BINBYTES8 =>
+          load_binbytes8()
+          break
+        case Opcodes.EMPTY_SET =>
+          load_empty_set()
+          break
+        case Opcodes.ADDITEMS =>
+          load_additems()
+          break
+        case Opcodes.FROZENSET =>
+          load_frozenset()
+          break
+        case Opcodes.MEMOIZE =>
+          load_memoize()
+          break
+        case Opcodes.FRAME =>
+          load_frame()
+          break
+        case Opcodes.NEWOBJ_EX =>
+          load_newobj_ex()
+          break
+        case Opcodes.STACK_GLOBAL =>
+          load_stack_global()
+          break
 
-      // protocol 5 (python 3.8+)
-      case Opcodes.BYTEARRAY8 =>
-        load_bytearray8()
-      case Opcodes.READONLY_BUFFER =>
-        load_readonly_buffer()
-      case Opcodes.NEXT_BUFFER =>
-        load_next_buffer()
-      case _ =>
-        throw new InvalidOpcodeException("invalid pickle opcode: " + key)
+        // protocol 5 (python 3.8+)
+        case Opcodes.BYTEARRAY8 =>
+          load_bytearray8()
+          break
+        case Opcodes.READONLY_BUFFER =>
+          load_readonly_buffer()
+          break
+        case Opcodes.NEXT_BUFFER =>
+          load_next_buffer()
+          break
+        case _ =>
+          throw new InvalidOpcodeException("invalid pickle opcode: " + key)
+      }
     }
+
     Unpickler.NO_RETURN_VALUE
   }
 
@@ -316,9 +442,7 @@ class Unpickler {
 
   @throws[PickleException]
   @throws[IOException]
-  private[pickle] def load_next_buffer(): Unit = {
-    stack.add(next_buffer)
-  }
+  private[pickle] def load_next_buffer(): Unit = stack.add(next_buffer)
 
   @throws[IOException]
   private[pickle] def load_bytearray8(): Unit = {
@@ -332,7 +456,8 @@ class Unpickler {
     val args = stack.pop
     val target = stack.peek
     try {
-      val setStateMethod = target.getClass.getMethod("__setstate__", args.getClass)
+      val setStateMethod = target.getClass
+        .getMethod("__setstate__", args.getClass)
       setStateMethod.invoke(target, args)
     } catch {
       case e: Exception =>
@@ -343,20 +468,15 @@ class Unpickler {
   @throws[IOException]
   private[pickle] def load_proto(): Unit = {
     val proto = PickleUtils.readbyte(input)
-    if (proto < 0 || proto > HIGHEST_PROTOCOL) throw new PickleException("unsupported pickle protocol: " + proto)
+    if (proto < 0 || proto > HIGHEST_PROTOCOL)
+      throw new PickleException("unsupported pickle protocol: " + proto)
   }
 
-  private[pickle] def load_none(): Unit = {
-    stack.add(null)
-  }
+  private[pickle] def load_none(): Unit = stack.add(null)
 
-  private[pickle] def load_false(): Unit = {
-    stack.add(false.asInstanceOf[AnyRef])
-  }
+  private[pickle] def load_false(): Unit = stack.add(false.asInstanceOf[AnyRef])
 
-  private[pickle] def load_true(): Unit = {
-    stack.add(true.asInstanceOf[AnyRef])
-  }
+  private[pickle] def load_true(): Unit = stack.add(true.asInstanceOf[AnyRef])
 
   @throws[IOException]
   private[pickle] def load_int(): Unit = {
@@ -366,12 +486,12 @@ class Unpickler {
     else if (data == Opcodes.TRUE.substring(1)) vaz = true
     else {
       val number = data.substring(0, data.length - 1)
-      try vaz = java.lang.Integer.parseInt(number, 10) //.asInstanceOf[Any]
+      try vaz = java.lang.Integer.parseInt(number, 10) // .asInstanceOf[Any]
       catch {
         case x: NumberFormatException =>
 
           // hmm, integer didn't work.. is it perhaps an int from a 64-bit python? so try long:
-          vaz = java.lang.Long.parseLong(number, 10) //.asInstanceOf[AnyRef]
+          vaz = java.lang.Long.parseLong(number, 10) // .asInstanceOf[AnyRef]
       }
     }
     stack.add(vaz)
@@ -384,9 +504,8 @@ class Unpickler {
   }
 
   @throws[IOException]
-  private[pickle] def load_binint1(): Unit = {
-    stack.add(PickleUtils.readbyte(input).toInt)
-  }
+  private[pickle] def load_binint1(): Unit = stack
+    .add(PickleUtils.readbyte(input).toInt)
 
   @throws[IOException]
   private[pickle] def load_binint2(): Unit = {
@@ -397,7 +516,8 @@ class Unpickler {
   @throws[IOException]
   private[pickle] def load_long(): Unit = {
     var `val` = PickleUtils.readline(input)
-    if (`val` != null && `val`.endsWith("L")) `val` = `val`.substring(0, `val`.length - 1)
+    if (`val` != null && `val`.endsWith("L"))
+      `val` = `val`.substring(0, `val`.length - 1)
     val bi = new BigInteger(`val`)
     stack.add(PickleUtils.optimizeBigint(bi))
   }
@@ -419,12 +539,14 @@ class Unpickler {
   @throws[IOException]
   private[pickle] def load_float(): Unit = {
     val ele = PickleUtils.readline(input, true)
+    println(s"load_float parse float value: $ele")
     stack.add(ele.toDouble)
   }
 
   @throws[IOException]
   private[pickle] def load_binfloat(): Unit = {
     val ele = PickleUtils.bytes_to_double(PickleUtils.readbytes(input, 8), 0)
+    println(s"load_binfloat parse double value: $ele")
     stack.add(ele)
   }
 
@@ -432,17 +554,17 @@ class Unpickler {
   private[pickle] def load_string(): Unit = {
     var rep = PickleUtils.readline(input)
     var quotesOk = false
-    breakable{
-      for (q <- Array[String]("\"", "'")) {
-        if (rep.startsWith(q)) {
-          if (!rep.endsWith(q)) throw new PickleException("insecure string pickle")
-          rep = rep.substring(1, rep.length - 1) // strip quotes
-          quotesOk = true
-          break //todo: break is not supported
-        }
-      } // double or single quote
-    }
+    breakable(
+      for (q <- Array[String]("\"", "'")) if (rep.startsWith(q)) {
+        if (!rep.endsWith(q)) throw new PickleException("insecure string pickle")
+        rep = rep.substring(1, rep.length - 1) // strip quotes
+        quotesOk = true
+        break // todo: break is not supported
+      },
+      // double or single quote
+    )
     if (!quotesOk) throw new PickleException("insecure string pickle")
+    println(s"parse string value : $rep")
     stack.add(PickleUtils.decode_escaped(rep))
   }
 
@@ -510,13 +632,9 @@ class Unpickler {
     stack.add(top.toArray)
   }
 
-  private[pickle] def load_empty_tuple(): Unit = {
-    stack.add(new Array[Any](0))
-  }
+  private[pickle] def load_empty_tuple(): Unit = stack.add(new Array[Any](0))
 
-  private[pickle] def load_tuple1(): Unit = {
-    stack.add(Array[Any](stack.pop))
-  }
+  private[pickle] def load_tuple1(): Unit = stack.add(Array[Any](stack.pop))
 
   private[pickle] def load_tuple2(): Unit = {
     val o2 = stack.pop
@@ -532,16 +650,17 @@ class Unpickler {
   }
 
   private[pickle] def load_empty_list(): Unit = {
+    println("try to load empty list --really ListBuffer ")
     stack.add(ListBuffer())
   }
 
   private[pickle] def load_empty_dictionary(): Unit = {
+    println(" try to load empty dict")
     stack.add(new mutable.HashMap[AnyRef, AnyRef]())
   }
 
-  private[pickle] def load_empty_set(): Unit = {
-    stack.add(new mutable.HashSet[AnyRef])
-  }
+  private[pickle] def load_empty_set(): Unit = stack
+    .add(new mutable.HashSet[AnyRef])
 
   private[pickle] def load_list(): Unit = {
     val top = stack.pop_all_since_marker
@@ -550,7 +669,7 @@ class Unpickler {
 
   private[pickle] def load_dict(): Unit = {
     val top = stack.pop_all_since_marker
-    val map = new mutable.HashMap[Any, Any]()//top.size)
+    val map = new mutable.HashMap[Any, Any]() // top.size)
     var i = 0
     while (i < top.size) {
       val key = top(i)
@@ -563,13 +682,14 @@ class Unpickler {
 
   private[pickle] def load_frozenset(): Unit = {
     val top = stack.pop_all_since_marker
-    val set = new mutable.HashSet[AnyRef]()//(top)
+    val set = new mutable.HashSet[AnyRef]() // (top)
     stack.add(set)
   }
 
   private[pickle] def load_additems(): Unit = {
     val top = stack.pop_all_since_marker
-    @SuppressWarnings(Array("unchecked")) val set = stack.pop.asInstanceOf[mutable.HashSet[Any]]
+    @SuppressWarnings(Array("unchecked"))
+    val set = stack.pop.asInstanceOf[mutable.HashSet[Any]]
     set.addAll(top)
     stack.add(set)
   }
@@ -589,42 +709,41 @@ class Unpickler {
 
   private[pickle] def load_global_sub(module: String, name: String): Unit = {
     var constructor = Unpickler.objectConstructors.get(module + "." + name).get
-    if (constructor == null) {
+    if (constructor == null)
       // check if it is an exception
-      if (module == "exceptions") {
+      if (module == "exceptions")
         // python 2.x
-        constructor = new ExceptionConstructor(classOf[PythonException], module, name)
-      }
-      else if (module == "builtins" || module == "__builtin__") if (name.endsWith("Error") || name.endsWith("Warning") || name.endsWith("Exception") || name == "GeneratorExit" || name == "KeyboardInterrupt" || name == "StopIteration" || name == "SystemExit") {
-        // it's a python 3.x exception
-        constructor = new ExceptionConstructor(classOf[PythonException], module, name)
-      }
-      else {
+        constructor =
+          new ExceptionConstructor(classOf[PythonException], module, name)
+      else if (module == "builtins" || module == "__builtin__")
+        if (
+          name.endsWith("Error") || name.endsWith("Warning") ||
+          name.endsWith("Exception") || name == "GeneratorExit" ||
+          name == "KeyboardInterrupt" || name == "StopIteration" ||
+          name == "SystemExit"
+        )
+          // it's a python 3.x exception
+          constructor =
+            new ExceptionConstructor(classOf[PythonException], module, name)
+        else
+          // return a dictionary with the class's properties
+          constructor = new ClassDictConstructor(module, name)
+      else
         // return a dictionary with the class's properties
         constructor = new ClassDictConstructor(module, name)
-      }
-      else {
-        // return a dictionary with the class's properties
-        constructor = new ClassDictConstructor(module, name)
-      }
-    }
     stack.add(constructor)
   }
 
-  private[pickle] def load_pop(): Unit = {
-    stack.pop
-  }
+  private[pickle] def load_pop(): Unit = stack.pop
 
   private[pickle] def load_pop_mark(): Unit = {
     var o: Any = stack.pop
 //    do o = stack.pop while (o ne stack.MARKER)
-    while (o != stack.MARKER) do o = stack.pop
+    while o != stack.MARKER do o = stack.pop
     stack.trim()
   }
 
-  private[pickle] def load_dup(): Unit = {
-    stack.add(stack.peek)
-  }
+  private[pickle] def load_dup(): Unit = stack.add(stack.peek)
 
   @throws[IOException]
   private[pickle] def load_get(): Unit = {
@@ -665,29 +784,29 @@ class Unpickler {
     memo.put(i, stack.peek)
   }
 
-  private[pickle] def load_memoize(): Unit = {
-    memo.put(memo.size, stack.peek)
-  }
+  private[pickle] def load_memoize(): Unit = memo.put(memo.size, stack.peek)
 
   private[pickle] def load_append(): Unit = {
     val value = stack.pop
-    @SuppressWarnings(Array("unchecked")) 
+    @SuppressWarnings(Array("unchecked"))
     val list = stack.peek.asInstanceOf[ListBuffer[Any]]
+    println("try to append value to list buffer ...")
     list.append(value)
   }
 
   private[pickle] def load_appends(): Unit = {
     val top = stack.pop_all_since_marker
-    @SuppressWarnings(Array("unchecked")) 
+    @SuppressWarnings(Array("unchecked"))
     val list = stack.peek.asInstanceOf[ListBuffer[Any]]
-    list.addAll(top.toList)
+    list.addAll(top.toList.reverse)
 //    list.trimToSize()
   }
 
   private[pickle] def load_setitem(): Unit = {
     val value = stack.pop
     val key = stack.pop
-    @SuppressWarnings(Array("unchecked")) val dict = stack.peek.asInstanceOf[mutable.HashMap[Any, Any]]
+    @SuppressWarnings(Array("unchecked"))
+    val dict = stack.peek.asInstanceOf[mutable.HashMap[Any, Any]]
     dict.put(key, value)
   }
 
@@ -699,15 +818,13 @@ class Unpickler {
       newitems.put(key, value)
       value = stack.pop
     }
-    @SuppressWarnings(Array("unchecked")) 
+    @SuppressWarnings(Array("unchecked"))
     val dict = stack.peek.asInstanceOf[mutable.HashMap[Any, Any]]
     dict.++=(newitems)
 //    dict.putAll(newitems)
   }
 
-  private[pickle] def load_mark(): Unit = {
-    stack.add_mark
-  }
+  private[pickle] def load_mark(): Unit = stack.add_mark
 
   private[pickle] def load_reduce(): Unit = {
     val args = stack.pop.asInstanceOf[Array[AnyRef]]
@@ -715,23 +832,21 @@ class Unpickler {
     stack.add(constructor.construct(args))
   }
 
-  private[pickle] def load_newobj(): Unit = {
-    load_reduce() // for Java we just do the same as class(*args) instead of class.__new__(class,*args)
-  }
+  private[pickle] def load_newobj(): Unit = load_reduce() // for Java we just do the same as class(*args) instead of class.__new__(class,*args)
 
   private[pickle] def load_newobj_ex(): Unit = {
     val kwargs = stack.pop.asInstanceOf[mutable.HashMap[?, ?]]
     val args = stack.pop.asInstanceOf[Array[AnyRef]]
     val constructor = stack.pop.asInstanceOf[IObjectConstructor]
     if (kwargs.isEmpty) stack.add(constructor.construct(args))
-    else throw new PickleException("newobj_ex with keyword arguments not supported")
+    else
+      throw new PickleException("newobj_ex with keyword arguments not supported")
   }
 
   @throws[IOException]
-  private[pickle] def load_frame(): Unit = {
+  private[pickle] def load_frame(): Unit =
     // for now we simply skip the frame opcode and its length
     PickleUtils.readbytes(input, 8)
-  }
 
   @throws[IOException]
   private[pickle] def load_persid(): Unit = {
@@ -751,7 +866,7 @@ class Unpickler {
   private[pickle] def load_obj(): Unit = {
     var args = stack.pop_all_since_marker
     val constructor = args(0).asInstanceOf[IObjectConstructor]
-    args = args.slice(1, args.size) //sublist
+    args = args.slice(1, args.size) // sublist
     val objects = constructor.construct(args.map(_.asInstanceOf[AnyRef]).toArray)
     stack.add(objects)
   }
@@ -761,7 +876,8 @@ class Unpickler {
     val module = PickleUtils.readline(input)
     val classname = PickleUtils.readline(input)
     val args = stack.pop_all_since_marker
-    var constructor = Unpickler.objectConstructors.get(module + "." + classname).get
+    var constructor = Unpickler.objectConstructors.get(module + "." + classname)
+      .get
     if (constructor == null) {
       constructor = new ClassDictConstructor(module, classname)
       args.clear() // classdict doesn't have constructor args... so we may lose info here, hmm.
@@ -770,12 +886,17 @@ class Unpickler {
     stack.add(objects)
   }
 
-  /**
-   * Hook for the persistent id feature where an id is replaced externally by the appropriate object.
-   *
-   * @param pid the persistent id from the pickle
-   * @return the actual object that belongs to that id. The default implementation throws a PickleException,
-   *         telling you that you should implement this function yourself in a subclass of the Unpickler.
-   */
-  protected def persistentLoad(pid: Any): AnyRef = throw new PickleException("A load persistent id instruction was encountered, but no persistentLoad function was specified. (implement it in custom Unpickler subclass)")
+  /** Hook for the persistent id feature where an id is replaced externally by
+    * the appropriate object.
+    *
+    * @param pid
+    *   the persistent id from the pickle
+    * @return
+    *   the actual object that belongs to that id. The default implementation
+    *   throws a PickleException, telling you that you should implement this
+    *   function yourself in a subclass of the Unpickler.
+    */
+  protected def persistentLoad(pid: Any): AnyRef = throw new PickleException(
+    "A load persistent id instruction was encountered, but no persistentLoad function was specified. (implement it in custom Unpickler subclass)",
+  )
 }

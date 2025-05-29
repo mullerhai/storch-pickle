@@ -1,15 +1,12 @@
 package torch.pickle.objects
 
-import torch.pickle.IObjectConstructor
-
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-/**
- * This object constructor creates sets.
- *
- * 
- */
+import torch.pickle.IObjectConstructor
+
+/** This object constructor creates sets.
+  */
 class SetConstructor extends IObjectConstructor {
 //  override def construct(args: Array[AnyRef]): AnyRef = {
 //    // create a HashSet, args=arraylist of stuff to put in it

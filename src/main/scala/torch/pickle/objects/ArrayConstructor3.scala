@@ -10,7 +10,7 @@
 // * the objects are ints, etc. Returns an ArrayList<Object> if it needs to
 // * contain arbitrary objects (such as lists).
 // *
-// * 
+// *
 // */
 //class ArrayConstructor3 extends IObjectConstructor {
 //  @throws[PickleException]
@@ -46,7 +46,7 @@
 //      case 'b' => // signed integer 1 -> byte[]
 //        val result = new Array[Byte](values.size)
 //        var i = 0
-//      
+//
 //        for (c <- values) {
 //          result({
 //            i += 1; i - 1
@@ -57,7 +57,7 @@
 //      case 'h' => // signed integer 2 -> short[]
 //        val result = new Array[Short](values.size)
 //        var i = 0
-// 
+//
 //        for (c <- values) {
 //          result({
 //            i += 1; i - 1
@@ -79,7 +79,7 @@
 //      case 'l' => // signed integer 4 -> int[]
 //        val result = new Array[Int](values.size)
 //        var i = 0
-//        
+//
 //        for (c <- values) {
 //          result({
 //            i += 1; i - 1
@@ -90,7 +90,7 @@
 //      case 'L' => // unsigned integer 4 -> long[]
 //        val result = new Array[Long](values.size)
 //        var i = 0
-//      
+//
 //        for (c <- values) {
 //          result({
 //            i += 1; i - 1
@@ -100,7 +100,7 @@
 //      case 'f' => // floating point 4 -> float[]
 //        val result = new Array[Float](values.size)
 //        var i = 0
-//    
+//
 //        for (c <- values) {
 //          result({
 //            i += 1; i - 1

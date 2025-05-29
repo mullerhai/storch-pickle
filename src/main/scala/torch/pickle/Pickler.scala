@@ -1,10 +1,7 @@
 package torch.pickle
 
-import torch.pickle.objects.Time
-import torch.pickle.objects.TimeDelta
-
-import scala.util.control.Breaks.{break, breakable}
 import java.io.ByteArrayOutputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.lang.reflect.InvocationTargetException
@@ -13,124 +10,124 @@ import java.lang.reflect.Modifier
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.nio.charset.StandardCharsets
-import java.util.{Calendar, Date, GregorianCalendar, TimeZone}
+import java.util.Calendar
+import java.util.Date
+import java.util.GregorianCalendar
+import java.util.TimeZone
+
 import scala.collection.mutable
-import scala.jdk.CollectionConverters.*
 import scala.collection.mutable.HashMap
-/**
- * Pickle an object graph into a Python-compatible pickle stream. For
- * simplicity, the only supported pickle protocol at this time is protocol 2.
- * This class is NOT threadsafe! (Don't use the same pickler from different threads)
- *
- * See the README.txt for a table with the type mappings.
- *
- * 
- */
+import scala.jdk.CollectionConverters.*
+import scala.util.control.Breaks.break
+import scala.util.control.Breaks.breakable
+
+import torch.pickle.objects.Time
+import torch.pickle.objects.TimeDelta
+
+/** Pickle an object graph into a Python-compatible pickle stream. For
+  * simplicity, the only supported pickle protocol at this time is protocol 2.
+  * This class is NOT threadsafe! (Don't use the same pickler from different
+  * threads)
+  *
+  * See the README.txt for a table with the type mappings.
+  */
 object Pickler {
-  /**
-   * The highest Python pickle protocol supported by this Pickler.
-   */
+
+  /** The highest Python pickle protocol supported by this Pickler.
+    */
   var HIGHEST_PROTOCOL = 2
 
-  /**
-   * A memoized object.
-   */
-  protected class Memo(val obj: AnyRef, val index: Int) {
-  }
+  /** A memoized object.
+    */
+  protected class Memo(val obj: AnyRef, val index: Int) {}
 
-  /**
-   * Limit on the recursion depth to avoid stack overflows.
-   */
+  /** Limit on the recursion depth to avoid stack overflows.
+    */
   protected val MAX_RECURSE_DEPTH = 1000
-  /**
-   * Registry of picklers for custom classes, to be able to not just pickle simple built in datatypes.
-   * You can add to this via {@link Pickler# registerCustomPickler}
-   */
+
+  /** Registry of picklers for custom classes, to be able to not just pickle
+    * simple built in datatypes. You can add to this via
+    * {@link Pickler# registerCustomPickler}
+    */
   protected val customPicklers = new HashMap[Class[?], IObjectPickler]
-  /**
-   * Registry of deconstructors for custom classes, to be able to pickle custom classes and also reconstruct.
-   * them using {@link Unpickler# registerConstructor}. can add to this via {@link Pickler# registerCustomDeconstructor}
-   */
-  protected var customDeconstructors = new HashMap[Class[?], IObjectDeconstructor]
 
-  /**
-   * Register additional object picklers for custom classes.
-   * If you register an interface or abstract base class, it means the pickler is used for
-   * the whole inheritance tree of all classes ultimately implementing that interface or abstract base class.
-   * If you register a normal concrete class, the pickler is only used for objects of exactly that particular class.
-   */
-  def registerCustomPickler(clazz: Class[?], pickler: IObjectPickler): Unit = {
+  /** Registry of deconstructors for custom classes, to be able to pickle custom
+    * classes and also reconstruct. them using
+    * {@link Unpickler# registerConstructor}. can add to this via
+    * {@link Pickler# registerCustomDeconstructor}
+    */
+  protected var customDeconstructors =
+    new HashMap[Class[?], IObjectDeconstructor]
+
+  /** Register additional object picklers for custom classes. If you register an
+    * interface or abstract base class, it means the pickler is used for the
+    * whole inheritance tree of all classes ultimately implementing that
+    * interface or abstract base class. If you register a normal concrete class,
+    * the pickler is only used for objects of exactly that particular class.
+    */
+  def registerCustomPickler(clazz: Class[?], pickler: IObjectPickler): Unit =
     customPicklers.put(clazz, pickler)
-  }
 
-  /**
-   * Register custom object deconstructor for custom classes.
-   * An alternative for writing your own pickler, you can create a deconstructor which will have a 
-   * name & module, and the deconstructor will convert an object to a list of objects which will then
-   * be used as the arguments for reconstructing when unpickling.
-   */
-  def registerCustomDeconstructor(clazz: Class[?], deconstructor: IObjectDeconstructor): Unit = {
-    customDeconstructors.put(clazz, deconstructor)
-  }
+  /** Register custom object deconstructor for custom classes. An alternative
+    * for writing your own pickler, you can create a deconstructor which will
+    * have a name & module, and the deconstructor will convert an object to a
+    * list of objects which will then be used as the arguments for
+    * reconstructing when unpickling.
+    */
+  def registerCustomDeconstructor(
+      clazz: Class[?],
+      deconstructor: IObjectDeconstructor,
+  ): Unit = customDeconstructors.put(clazz, deconstructor)
 }
 
-
-/**
- * Create a Pickler. Also specify if it is to compare objects by value.
- * If you compare objects by value, the object graph might be altered,
- * as different instances with the same value will be unified.
- * (The default for valueCompare when creating a pickler is true,
- * so if this is problematic for you, you can turn it off here)
- */
+/** Create a Pickler. Also specify if it is to compare objects by value. If you
+  * compare objects by value, the object graph might be altered, as different
+  * instances with the same value will be unified. (The default for valueCompare
+  * when creating a pickler is true, so if this is problematic for you, you can
+  * turn it off here)
+  */
 class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
 //  protected var useMemo = true
 
 //  this.useMemo = useMemo
 //  this.valueCompare = valueCompare
-  /**
-   * Current recursion level.
-   */
+  /** Current recursion level.
+    */
   protected var recurse = 0 // recursion level
-  /**
-   * Output where the pickle data is written to.
-   */
+  /** Output where the pickle data is written to.
+    */
   protected var out: OutputStream = null
-  /**
-   * The Python pickle protocol version of the pickles created by this library.
-   */
-  final protected val PROTOCOL = 2
-  /**
-   * Use memoization or not. This saves pickle size, but can only create pickles of objects that are hashable.
-   */
-  /**
-   * When memoizing, compare objects by value. This saves pickle size, but can slow down pickling.
-   * Also, it should only be used if the object graph is immutable. Unused if useMemo is false.
-   */
+
+  /** The Python pickle protocol version of the pickles created by this library.
+    */
+  protected final val PROTOCOL = 2
+
+  /** Use memoization or not. This saves pickle size, but can only create
+    * pickles of objects that are hashable.
+    */
+  /** When memoizing, compare objects by value. This saves pickle size, but can
+    * slow down pickling. Also, it should only be used if the object graph is
+    * immutable. Unused if useMemo is false.
+    */
 //  protected var valueCompare = true
-  /**
-   * The memoization cache.
-   */
+  /** The memoization cache.
+    */
   protected var memo: HashMap[Int, Pickler.Memo] = null // maps object's identity hash to (object, memo index)
 
-  /**
-   * Create a Pickler. Specify if it is to use a memo table or not.
-   * The memo table is NOT reused across different calls.
-   * If you use a memo table, you can only pickle objects that are hashable.
-   */
-  def this(useMemo: Boolean)= {
-    this(useMemo, true)
-  }
+  /** Create a Pickler. Specify if it is to use a memo table or not. The memo
+    * table is NOT reused across different calls. If you use a memo table, you
+    * can only pickle objects that are hashable.
+    */
+  def this(useMemo: Boolean) = this(useMemo, true)
 
-  /**
-   * Create a Pickler.
-   */
+  /** Create a Pickler.
+    */
 //  def this ={
 //    this(true,true)
 //  }
 
-  /**
-   * Close the pickler stream, discard any internal buffers.
-   */
+  /** Close the pickler stream, discard any internal buffers.
+    */
   @throws[IOException]
   def close(): Unit = {
     memo = null
@@ -138,9 +135,8 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     out.close()
   }
 
-  /**
-   * Pickle a given object graph, returning the result as a byte array.
-   */
+  /** Pickle a given object graph, returning the result as a byte array.
+    */
   @throws[PickleException]
   @throws[IOException]
   def dumps(o: AnyRef): Array[Byte] = {
@@ -150,9 +146,14 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     bo.toByteArray
   }
 
-  /**
-   * Pickle a given object graph, writing the result to the output stream.
-   */
+  def save(pickleInstance: AnyRef, filePath: String): Unit = {
+    val fos = new FileOutputStream(filePath)
+    this.dump(pickleInstance, fos)
+    fos.close()
+  }
+
+  /** Pickle a given object graph, writing the result to the output stream.
+    */
   @throws[IOException]
   @throws[PickleException]
   def dump(o: AnyRef, stream: OutputStream): Unit = {
@@ -165,22 +166,25 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     memo = null // get rid of the memo table
     out.write(Opcodes.STOP)
     out.flush()
-    if (recurse != 0) throw new PickleException("recursive structure error, please report this problem") // sanity check
+    if (recurse != 0) throw new PickleException(
+      "recursive structure error, please report this problem",
+    ) // sanity check
   }
 
-  /**
-   * Pickle a single object and write its pickle representation to the output stream.
-   * Normally this is used internally by the pickler, but you can also utilize it from
-   * within custom picklers. This is handy if as part of the custom pickler, you need
-   * to write a couple of normal objects such as strings or ints, that are already
-   * supported by the pickler.
-   * This method can be called recursively to output sub-objects.
-   */
+  /** Pickle a single object and write its pickle representation to the output
+    * stream. Normally this is used internally by the pickler, but you can also
+    * utilize it from within custom picklers. This is handy if as part of the
+    * custom pickler, you need to write a couple of normal objects such as
+    * strings or ints, that are already supported by the pickler. This method
+    * can be called recursively to output sub-objects.
+    */
   @throws[PickleException]
   @throws[IOException]
   def save(o: Any | AnyRef): Unit = {
     recurse += 1
-    if (recurse > Pickler.MAX_RECURSE_DEPTH) throw new StackOverflowError("recursion too deep in Pickler.save (>" + Pickler.MAX_RECURSE_DEPTH + ")")
+    if (recurse > Pickler.MAX_RECURSE_DEPTH) throw new StackOverflowError(
+      "recursion too deep in Pickler.save (>" + Pickler.MAX_RECURSE_DEPTH + ")",
+    )
     // null type?
     if (o == null) {
       out.write(Opcodes.NONE)
@@ -196,23 +200,20 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     throw new PickleException("couldn't pickle object of type " + t)
   }
 
-  /**
-   * Write the object to the memo table and output a memo write opcode
-   * Only works for hashable objects
-   */
+  /** Write the object to the memo table and output a memo write opcode Only
+    * works for hashable objects
+    */
   @throws[IOException]
-  protected def writeMemo(obj: AnyRef|Any): Unit = {
+  protected def writeMemo(obj: AnyRef | Any): Unit = {
     if (!this.useMemo) return
-    val hash = if (valueCompare) obj.hashCode
-    else System.identityHashCode(obj)
+    val hash = if (valueCompare) obj.hashCode else System.identityHashCode(obj)
     if (!memo.contains(hash)) {
       val memo_index = memo.size
       memo.put(hash, new Pickler.Memo(obj.asInstanceOf[AnyRef], memo_index))
-      if (memo_index <= 0xFF) {
+      if (memo_index <= 0xff) {
         out.write(Opcodes.BINPUT)
         out.write(memo_index.toByte)
-      }
-      else {
+      } else {
         out.write(Opcodes.LONG_BINPUT)
         val index_bytes = PickleUtils.integer_to_bytes(memo_index)
         out.write(index_bytes, 0, 4)
@@ -220,23 +221,23 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     }
   }
 
-  /**
-   * Check the memo table and output a memo lookup if the object is found
-   */
+  /** Check the memo table and output a memo lookup if the object is found
+    */
   @throws[IOException]
   private def lookupMemo(objectType: Class[?], obj: Any): Boolean = {
     if (!this.useMemo) return false
     if (!objectType.isPrimitive) {
-      val hash = if (valueCompare) obj.hashCode
-      else System.identityHashCode(obj)
-      if (memo.contains(hash) && (if (valueCompare) memo.get(hash).get == obj
-      else memo.get(hash).get == obj)) { // same object or value
+      val hash = if (valueCompare) obj.hashCode else System.identityHashCode(obj)
+      if (
+        memo.contains(hash) &&
+        (if (valueCompare) memo.get(hash).get == obj
+         else memo.get(hash).get == obj)
+      ) { // same object or value
         val memo_index = memo.get(hash).get.index
         if (memo_index <= 0xff) {
           out.write(Opcodes.BINGET)
           out.write(memo_index.toByte)
-        }
-        else {
+        } else {
           out.write(Opcodes.LONG_BINGET)
           val index_bytes = PickleUtils.integer_to_bytes(memo_index)
           out.write(index_bytes, 0, 4)
@@ -247,9 +248,8 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     false
   }
 
-  /**
-   * Process a single object to be pickled.
-   */
+  /** Process a single object to be pickled.
+    */
   @throws[IOException]
   private def dispatch(t: Class[?], o: Any): Boolean = {
     // is it a primitive array?
@@ -307,12 +307,14 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     // Check for persistentId
     val persistentId = persistentIdToNull(o)
     if (persistentId != null) {
-      if (persistentId.isInstanceOf[String] && !(persistentId.asInstanceOf[String]).contains("\n")) {
+      if (
+        persistentId.isInstanceOf[String] &&
+        !persistentId.asInstanceOf[String].contains("\n")
+      ) {
         out.write(Opcodes.PERSID)
         out.write(persistentId.asInstanceOf[String].getBytes)
         out.write("\n".getBytes)
-      }
-      else {
+      } else {
         save(persistentId)
         out.write(Opcodes.BINPERSID)
       }
@@ -378,6 +380,10 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
       put_map(o.asInstanceOf[Map[?, ?]])
       return true
     }
+    if (o.isInstanceOf[mutable.Map[?, ?]]) {
+      put_mutable_map(o.asInstanceOf[mutable.Map[?, ?]])
+      return true
+    }
     if (o.isInstanceOf[List[?]]) {
       put_collection(o.asInstanceOf[List[?]])
       return true
@@ -394,36 +400,45 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     false
   }
 
-  /**
-   * Get the custom pickler fot the given class, to be able to pickle not just built in collection types.
-   * A custom pickler is matched on the interface or abstract base class that the object implements or inherits from.
-   *
-   * @param t the class of the object to be pickled
-   * @return null (if no custom pickler found) or a pickler registered for this class (via {@link Pickler# registerCustomPickler})
-   */
+  /** Get the custom pickler fot the given class, to be able to pickle not just
+    * built in collection types. A custom pickler is matched on the interface or
+    * abstract base class that the object implements or inherits from.
+    *
+    * @param t
+    *   the class of the object to be pickled
+    * @return
+    *   null (if no custom pickler found) or a pickler registered for this class
+    *   (via {@link Pickler# registerCustomPickler})
+    */
   protected def getCustomPickler(t: Class[?]): IObjectPickler = {
-    val pickler = Pickler.customPicklers.get(t).get
+//    println(s"pickler custom pickler map size ${Pickler.customPicklers.size}")
+    Pickler.customPicklers
+      .foreach(ele => println(s"ele key ${ele._1} value ${ele._2}"))
+    val pickler = Pickler.customPicklers.getOrElse(t, null)
     if (pickler != null) return pickler // exact match
     // check if there's a custom pickler registered for an interface or abstract base class
     // that this object implements or inherits from.
-  
-    Pickler.customPicklers.toSeq.foreach(ele=>{
-      if  ele._1.isAssignableFrom(t) then return ele._2
-    })
+
+    Pickler.customPicklers.toSeq
+      .foreach(ele => if ele._1.isAssignableFrom(t) then return ele._2)
 //    for (x <- Pickler.customPicklers.entrySet) {
 //      if (x.getKey.isAssignableFrom(t)) return x.getValue
 //    }
     null
   }
 
-  /**
-   * Get the custom deconstructor fot the given class, to be able to pickle and unpickle custom classes
-   * A custom deconstructor is matched on the interface or abstract base class that the object implements or inherits from.
-   *
-   * @param t the class of the object to be pickled
-   * @return null (if no custom deconstructor found) or a deconstructor registered for this class (via {@link Pickler# registerCustomDeconstructor})
-   */
-  protected def getCustomDeconstructor(t: Class[?]): IObjectDeconstructor = Pickler.customDeconstructors.get(t).get
+  /** Get the custom deconstructor fot the given class, to be able to pickle and
+    * unpickle custom classes A custom deconstructor is matched on the interface
+    * or abstract base class that the object implements or inherits from.
+    *
+    * @param t
+    *   the class of the object to be pickled
+    * @return
+    *   null (if no custom deconstructor found) or a deconstructor registered
+    *   for this class (via {@link Pickler# registerCustomDeconstructor})
+    */
+  protected def getCustomDeconstructor(t: Class[?]): IObjectDeconstructor =
+    Pickler.customDeconstructors.getOrElse(t, null)
 
   @throws[IOException]
   private[pickle] def put_collection(list: Seq[?]): Unit = {
@@ -431,9 +446,7 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     writeMemo(list)
     out.write(Opcodes.MARK)
 
-    for (o <- list) {
-      save(o)
-    }
+    for (o <- list) save(o)
     out.write(Opcodes.APPENDS)
   }
 
@@ -442,10 +455,23 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     out.write(Opcodes.EMPTY_DICT)
     writeMemo(o)
     out.write(Opcodes.MARK)
-   
+
     for (k <- o.keySet) {
       save(k)
       save(o.get(k))
+    }
+    out.write(Opcodes.SETITEMS)
+  }
+
+  @throws[IOException]
+  private[pickle] def put_mutable_map(o: mutable.Map[?, ?]): Unit = {
+    out.write(Opcodes.EMPTY_DICT)
+    writeMemo(o)
+    out.write(Opcodes.MARK)
+
+    for (k <- o.keySet) {
+      save(k)
+      if o.contains(k) then save(o.get(k).get)
     }
     out.write(Opcodes.SETITEMS)
   }
@@ -457,9 +483,7 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     out.write(Opcodes.EMPTY_LIST)
     out.write(Opcodes.MARK)
 
-    for (x <- o) {
-      save(x)
-    }
+    for (x <- o) save(x)
     out.write(Opcodes.APPENDS)
     out.write(Opcodes.TUPLE1)
     out.write(Opcodes.REDUCE)
@@ -497,7 +521,10 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
   }
 
   @throws[IOException]
-  private[pickle] def put_calendar_without_timezone(cal: Calendar, writememo: Boolean): Unit = {
+  private[pickle] def put_calendar_without_timezone(
+      cal: Calendar,
+      writememo: Boolean,
+  ): Unit = {
     // Note that we can't use the 2-arg representation of a datetime here.
     // Python 3 uses the SHORT_BINBYTES opcode to encode the first argument,
     // but python 2 uses SHORT_BINSTRING instead. This causes encoding problems
@@ -569,8 +596,7 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     if (timeZone.getID == "UTC") {
       out.write("pytz\n_UTC\n".getBytes)
       out.write(Opcodes.MARK)
-    }
-    else {
+    } else {
       // Don't write out the shorthand pytz._p for pickle,
       // because it needs the internal timezone offset amounts.
       // It is not possible to supply the correct amounts for that
@@ -594,27 +620,28 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     // 4 or more->MARK+items+TUPLE
     if (array.length == 0) out.write(Opcodes.EMPTY_TUPLE)
     else if (array.length == 1) {
-      if (array(0) eq array) throw new PickleException("recursive array not supported, use list")
+      if (array(0) eq array)
+        throw new PickleException("recursive array not supported, use list")
       save(array(0))
       out.write(Opcodes.TUPLE1)
-    }
-    else if (array.length == 2) {
-      if ((array(0) eq array) || (array(1) eq array)) throw new PickleException("recursive array not supported, use list")
+    } else if (array.length == 2) {
+      if ((array(0) eq array) || (array(1) eq array))
+        throw new PickleException("recursive array not supported, use list")
       save(array(0))
       save(array(1))
       out.write(Opcodes.TUPLE2)
-    }
-    else if (array.length == 3) {
-      if ((array(0) eq array) || (array(1) eq array) || (array(2) eq array)) throw new PickleException("recursive array not supported, use list")
+    } else if (array.length == 3) {
+      if ((array(0) eq array) || (array(1) eq array) || (array(2) eq array))
+        throw new PickleException("recursive array not supported, use list")
       save(array(0))
       save(array(1))
       save(array(2))
       out.write(Opcodes.TUPLE3)
-    }
-    else {
+    } else {
       out.write(Opcodes.MARK)
       for (o <- array) {
-        if (o eq array) throw new PickleException("recursive array not supported, use list")
+        if (o eq array)
+          throw new PickleException("recursive array not supported, use list")
         save(o)
       }
       out.write(Opcodes.TUPLE)
@@ -623,14 +650,16 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
   }
 
   @throws[IOException]
-  private[pickle] def put_arrayOfPrimitives(t: Class[?], array: AnyRef|Any): Unit = {
+  private[pickle] def put_arrayOfPrimitives(
+      t: Class[?],
+      array: AnyRef | Any,
+  ): Unit = {
     if (t == java.lang.Boolean.TYPE) {
       // a bool[] isn't written as an array but rather as a tuple
       val source = array.asInstanceOf[Array[Boolean]]
       val boolarray = new Array[AnyRef](source.length)
-      for (i <- 0 until source.length) {
+      for (i <- 0 until source.length)
         boolarray(i) = source(i).asInstanceOf[AnyRef]
-      }
       put_arrayOfObjects(boolarray)
       return
     }
@@ -660,41 +689,27 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
       out.write('h') // signed short
       out.write(Opcodes.EMPTY_LIST)
       out.write(Opcodes.MARK)
-      for (s <- array.asInstanceOf[Array[Short]]) {
-        save(s)
-      }
-    }
-    else if (t == Integer.TYPE) {
+      for (s <- array.asInstanceOf[Array[Short]]) save(s)
+    } else if (t == Integer.TYPE) {
       out.write('i') // signed int
       out.write(Opcodes.EMPTY_LIST)
       out.write(Opcodes.MARK)
-      for (i <- array.asInstanceOf[Array[Int]]) {
-        save(i)
-      }
-    }
-    else if (t == java.lang.Long.TYPE) {
+      for (i <- array.asInstanceOf[Array[Int]]) save(i)
+    } else if (t == java.lang.Long.TYPE) {
       out.write('l') // signed long
       out.write(Opcodes.EMPTY_LIST)
       out.write(Opcodes.MARK)
-      for (v <- array.asInstanceOf[Array[Long]]) {
-        save(v)
-      }
-    }
-    else if (t == java.lang.Float.TYPE) {
+      for (v <- array.asInstanceOf[Array[Long]]) save(v)
+    } else if (t == java.lang.Float.TYPE) {
       out.write('f') // float
       out.write(Opcodes.EMPTY_LIST)
       out.write(Opcodes.MARK)
-      for (f <- array.asInstanceOf[Array[Float]]) {
-        save(f)
-      }
-    }
-    else if (t == java.lang.Double.TYPE) {
+      for (f <- array.asInstanceOf[Array[Float]]) save(f)
+    } else if (t == java.lang.Double.TYPE) {
       out.write('d') // double
       out.write(Opcodes.EMPTY_LIST)
       out.write(Opcodes.MARK)
-      for (d <- array.asInstanceOf[Array[Double]]) {
-        save(d)
-      }
+      for (d <- array.asInstanceOf[Array[Double]]) save(d)
     }
     out.write(Opcodes.APPENDS)
     out.write(Opcodes.TUPLE2)
@@ -703,9 +718,14 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
   }
 
   @throws[IOException]
-  private[pickle] def put_global(deconstructor: IObjectDeconstructor, obj: AnyRef|Any): Unit = {
+  private[pickle] def put_global(
+      deconstructor: IObjectDeconstructor,
+      obj: AnyRef | Any,
+  ): Unit = {
     out.write(Opcodes.GLOBAL)
-    out.write((deconstructor.getModule + "\n" + deconstructor.getName + "\n").getBytes)
+    out.write(
+      (deconstructor.getModule + "\n" + deconstructor.getName + "\n").getBytes,
+    )
     val values = deconstructor.deconstruct(obj)
     if (values.length > 0) {
       save(values)
@@ -716,7 +736,7 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
 
   @throws[IOException]
   private[pickle] def put_decimal(d: BigDecimal): Unit = {
-    //"cdecimal\nDecimal\nU\n12345.6789\u0085R."
+    // "cdecimal\nDecimal\nU\n12345.6789\u0085R."
     out.write(Opcodes.GLOBAL)
     out.write("decimal\nDecimal\n".getBytes)
     put_string(d.toEngineeringString)
@@ -732,8 +752,7 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
       out.write(Opcodes.LONG1)
       out.write(b.length)
       out.write(b)
-    }
-    else {
+    } else {
       out.write(Opcodes.LONG4)
       out.write(PickleUtils.integer_to_bytes(b.length))
       out.write(b)
@@ -786,36 +805,37 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
   }
 
   @throws[IOException]
-  private[pickle] def put_bool(b: Boolean): Unit = {
-    if (b) out.write(Opcodes.NEWTRUE)
-    else out.write(Opcodes.NEWFALSE)
-  }
+  private[pickle] def put_bool(b: Boolean): Unit =
+    if (b) out.write(Opcodes.NEWTRUE) else out.write(Opcodes.NEWFALSE)
 
   @throws[PickleException]
   @throws[IOException]
   private[pickle] def put_javabean(o: Any): Unit = {
-    val map = new HashMap[String, AnyRef]
+    val map = new mutable.HashMap[String, AnyRef]
     try {
       // note: don't use the java.bean api, because that is not available on Android.
-      for (m <- o.getClass.getMethods) {
-        breakable{
-          val modifiers = m.getModifiers
-          if ((modifiers & Modifier.PUBLIC) != 0 && (modifiers & Modifier.STATIC) == 0) {
-            val methodname = m.getName
-            var prefixlen = 0
-            if (methodname == "getClass") break() //todo: continue is not supported
-            if (methodname.startsWith("get")) prefixlen = 3
-            else if (methodname.startsWith("is")) prefixlen = 2
-            else break() //todo: continue is not supported
-            val value = m.invoke(o)
-            var name = methodname.substring(prefixlen)
-            if (name.length == 1) name = name.toLowerCase
-            else if (!Character.isUpperCase(name.charAt(1))) name = Character.toLowerCase(name.charAt(0)) + name.substring(1)
-            map.put(name, value)
-          }
+      for (m <- o.getClass.getMethods) breakable {
+        val modifiers = m.getModifiers
+        if (
+          (modifiers & Modifier.PUBLIC) != 0 && (modifiers & Modifier.STATIC) ==
+            0
+        ) {
+          val methodname = m.getName
+          var prefixlen = 0
+          if (methodname == "getClass") break() // todo: continue is not supported
+          if (methodname.startsWith("get")) prefixlen = 3
+          else if (methodname.startsWith("is")) prefixlen = 2
+          else break() // todo: continue is not supported
+          val value = m.invoke(o)
+          var name = methodname.substring(prefixlen)
+          if (name.length == 1) name = name.toLowerCase
+          else if (!Character.isUpperCase(name.charAt(1)))
+            name = Character.toLowerCase(name.charAt(0)) + name.substring(1)
+          map.put(name, value)
+          println(s"map put is name: $name ,value: $value map size ${map.size}")
         }
-
       }
+
       map.put("__class__", o.getClass.getName)
       save(map)
     } catch {
@@ -828,11 +848,14 @@ class Pickler(var useMemo: Boolean = true, valueCompare: Boolean = true) {
     }
   }
 
-  /**
-   * Hook for the persistent id feature where an object is replaced externally by an id
-   *
-   * @param obj the object to replace with an id
-   * @return the id object that belongs to this object, or null if this object isn't replaced by an id.
-   */
+  /** Hook for the persistent id feature where an object is replaced externally
+    * by an id
+    *
+    * @param obj
+    *   the object to replace with an id
+    * @return
+    *   the id object that belongs to this object, or null if this object isn't
+    *   replaced by an id.
+    */
   protected def persistentIdToNull(obj: Any): AnyRef = null
 }
