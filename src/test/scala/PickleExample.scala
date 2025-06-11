@@ -2,14 +2,12 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.*
-
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters.*
-
 import torch.pickle.Pickler
 import torch.pickle.Unpickler
+
 
 object PickleExamplee {
   @throws[IOException]
@@ -20,7 +18,7 @@ object PickleExamplee {
     map.put("microsoft", "hello")
     val mk = Seq(34, 12, 45)
     map.put("mk", mk)
-    val mk2 = List.of(12.5f, 34.9f, 20f, 902f)
+//    val mk2 = List.of(12.5f, 34.9f, 20f, 902f)
     val mk3 = Seq(12.5f, 34.9f, 20f, 902f)
     map.put("listMk", mk3)
     val values = new mutable.ListBuffer[Double]
@@ -119,8 +117,8 @@ object PickleExamplee {
     resMap.get("listMk").get.asInstanceOf[ListBuffer[Double]]
       .foreach(ele => println(ele))
     println(s"res Map size ${resMap.size}")
-//    val result = unpickler.loads(pythonpickle)
-//    println(result)
+    val result = unpickler.loads(pythonpickle)
+    println(result)
 //    System.out.println("type: " + result.getClass)
 //    val list = result.asInstanceOf[java.util.List[_]]
 //    val integer1 = list.get(0).asInstanceOf[Integer]
