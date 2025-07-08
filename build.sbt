@@ -72,7 +72,7 @@ ThisBuild / scmInfo := Some( ScmInfo( url( "https://github.com/mullerhai/storch-
 //ThisBuild / scmInfo := Some(new ScmInfo("https://github.com/mullerhai/storch-k8s.git"))
 //val scrImageVersion = "4.3.0" //4.0.34
 //libraryDependencies +=   "dev.storch" % "core_3" % "0.2.6-1.15.1"
-
+libraryDependencies += "io.github.mullerhai" % "storch-numpy_3" % "0.1.0"
 
 ThisBuild  / assemblyMergeStrategy := {
   case v if v.contains("module-info.class")   => MergeStrategy.discard

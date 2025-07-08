@@ -1,5 +1,7 @@
 package torch.pickle
 
+import torch.numpy.serve.Numpy
+
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -10,15 +12,15 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.*
-
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.ListBuffer
 import scala.util.control.Breaks.break
 import scala.util.control.Breaks.breakable
-
 import torch.pickle.objects.*
 import torch.pickle.objects.ArrayConstructor
+
+import java.nio.{ByteBuffer, ByteOrder}
 
 /** Unpickles an object graph from a pickle data inputstream. Supports all
   * pickle protocol versions. Maps the python objects on the corresponding java
@@ -60,6 +62,10 @@ object Unpickler {
   objectConstructors.put("__builtin__.bytes", new ByteArrayConstructor)
   objectConstructors.put("__builtin__.set", new SetConstructor)
   objectConstructors.put("builtins.set", new SetConstructor)
+  objectConstructors.put("numpy._core.multiarray._reconstruct", new NumpyNdMultiArrayConstructor) //https://github.com/numpy/numpy/blob/main/numpy/core/multiarray.py
+  objectConstructors.put("numpy.ndarray", new NumpyNdArrayConstructor) //https://numpy.org/doc/2.2/reference/generated/numpy.ndarray.html
+  objectConstructors.put("data._reconstruct", new NumpyNdDataConstructor) //numpy.ndarray.data  https://numpy.org/doc/2.2/reference/generated/numpy.ndarray.data.html
+  objectConstructors.put("numpy.dtype", new NumpyNdArrayDTypeConstructor) //https://numpy.org/doc/2.2/reference/generated/numpy.dtype.html
   objectConstructors.put(
     "datetime.datetime",
     new DateTimeConstructor(DateTimeConstructor.DATETIME),
@@ -106,9 +112,9 @@ class Unpickler {
     */
   protected final val HIGHEST_PROTOCOL = 5
 
-  /** Internal cache of memoized objects.
+  /** Internal cache of memoized objects. protected
     */
-  protected var memo: mutable.HashMap[Int, Any] = new mutable.HashMap[Int, Any]()
+  var memo: mutable.HashMap[Int, Any] = new mutable.HashMap[Int, Any]()
 
   /** The stack that is used for building the resulting object graph.
     */
@@ -140,9 +146,9 @@ class Unpickler {
     try breakable(
         while ({ key = PickleUtils.readbyte(input); key != -1 }) {
           val value = dispatch(key)
-          println(s"get key: $key value: $value stack: ${stack
-              .size()} Unpickler.NO_RETURN_VALUE ${Unpickler.NO_RETURN_VALUE}")
-          if (stack.size() == 6) println(stack)
+//          println(s"get key: $key value: $value stack: ${stack
+//              .size()} Unpickler.NO_RETURN_VALUE ${Unpickler.NO_RETURN_VALUE}")
+//          if (stack.size() == 6) println(stack)
           if value != Unpickler.NO_RETURN_VALUE then return value
         },
 //        while true do
@@ -452,15 +458,42 @@ class Unpickler {
     stack.add(PickleUtils.readbytes(input, len))
   }
 
+  def byteArrayToFloatArray(byteArray: Array[Byte]): Array[Float] = {
+    // 创建一个 ByteBuffer，包装字节数组
+    val buffer = ByteBuffer.wrap(byteArray).order(ByteOrder.nativeOrder())
+    // 计算 float 数组的长度
+    val floatArray = new Array[Float](byteArray.length / 4)
+    // 从 ByteBuffer 中读取 float 元素到 float 数组
+    buffer.asFloatBuffer().get(floatArray)
+    floatArray
+  }
+
   private[pickle] def load_build(): Unit = {
     val args = stack.pop
-    val target = stack.peek
+    var target = stack.peek
     try {
+      println(s"try to build target ${target.getClass.getName} args ${args.getClass.getName}")
+      val argsArray = args.asInstanceOf[Array[AnyRef]]
+      if(argsArray(0).isInstanceOf[Array[Byte]]){
+        val byteArray = argsArray(0).asInstanceOf[Array[Byte]]
+        println("is bytearray lenght: " + byteArray.length)
+        val arr = byteArrayToFloatArray(byteArray)
+        println(s"arr ${arr.mkString(",")}")
+//        val inputStream: InputStream = new ByteArrayInputStream(byteArray)
+//        val npArray = new Numpy(inputStream)
+//        println(npArray.float16Elements.head)
+//        val argsArray = argsArray.asInstanceOf[Array[AnyRef]]
+//        target = target.getClass.getMethod("apply", classOf[Array[AnyRef]]).invoke(target, argsArray)
+      }
+      println(s" args ${argsArray(0).getClass.getName}")
+      if(target.equals(None)) target = stack.peek
       val setStateMethod = target.getClass
         .getMethod("__setstate__", args.getClass)
       setStateMethod.invoke(target, args)
+      println("success invoke")
     } catch {
       case e: Exception =>
+        println(s"Error invoking __setstate__ on $target with args $args | error msg ${e.getMessage} ")
         throw new PickleException("failed to __setstate__()", e)
     }
   }
@@ -703,19 +736,35 @@ class Unpickler {
 
   private[pickle] def load_stack_global(): Unit = {
     val name = stack.pop.asInstanceOf[String]
-    val module = stack.pop.asInstanceOf[String]
-    load_global_sub(module, name)
+//    println(s"stack name ${name}")
+    val stackPopModule = stack.pop match {
+      case module: String => module
+      case mod: Option[String] => mod.get
+    }
+
+    println(s"stack module: ${stackPopModule}, name: ${name}")
+    println(s"try to load global class :  $stackPopModule.$name")
+    load_global_sub(stackPopModule, name)
+//    val module = stack.pop.asInstanceOf[String]
+//    load_global_sub(module, name)
   }
 
   private[pickle] def load_global_sub(module: String, name: String): Unit = {
+
     var constructor = Unpickler.objectConstructors.get(module + "." + name).get
+    println(s"HI, try to load global sub class :  $module.$name  constructor ${constructor.getClass.getName}\r\n")
     if (constructor == null)
       // check if it is an exception
       if (module == "exceptions")
         // python 2.x
         constructor =
           new ExceptionConstructor(classOf[PythonException], module, name)
-      else if (module == "builtins" || module == "__builtin__")
+      else if (module == "numpy") {
+        // python 3.x
+        println(s"Now try to read numpy array:  $module.$name, please use numpy.ndarray object")
+        constructor =
+          new ExceptionConstructor(classOf[PythonException], module, name)
+      } else if (module == "builtins" || module == "__builtin__")
         if (
           name.endsWith("Error") || name.endsWith("Warning") ||
           name.endsWith("Exception") || name == "GeneratorExit" ||
