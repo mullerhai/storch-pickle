@@ -1,8 +1,10 @@
-import torch.pickle.Unpickler
+import java.nio.file.Files
+import java.nio.file.Paths
 
-import java.nio.file.{Files, Paths}
 import scala.collection.mutable
 
+import torch.pickle.Unpickler
+//import torch.numpy.NDArray
 object example {
 
   def main(args: Array[String]): Unit = {
@@ -13,7 +15,7 @@ object example {
 //    val path = "D:\\data\\git\\storch-image\\pytorch_model.bin"
     val unpickler = new Unpickler
     val filePath = "D:\\data\\git\\storch-pickle\\testpickle6.dat"
-    val paths = Paths.get( path)//"D:\\data\\git\\storch-pickle\\testpickle5.dat")
+    val paths = Paths.get(path) // "D:\\data\\git\\storch-pickle\\testpickle5.dat")
     val stream = Files.newInputStream(paths)
     val res = unpickler.load(filePath)
 //    val res = unpickler.load(path)

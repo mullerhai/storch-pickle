@@ -36,6 +36,7 @@ class UnpickleStack extends Serializable:
     stack.last
 
   def trim(): Unit =
+    stack.trimEnd(stack.length - 1)
     // ListBuffer 没有类似 trimToSize 的方法，这里可认为无操作
     ()
 

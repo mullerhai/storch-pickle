@@ -1,26 +1,28 @@
 package torch.pickle
 
-import torch.numpy.serve.Numpy
-
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.lang.reflect.Method
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.*
+
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.ListBuffer
 import scala.util.control.Breaks.break
 import scala.util.control.Breaks.breakable
+
+//import FloatByteConversion.byteArrayToFloatArray
+import torch.numpy.serve.Numpy
 import torch.pickle.objects.*
 import torch.pickle.objects.ArrayConstructor
-
-import java.nio.{ByteBuffer, ByteOrder}
 
 /** Unpickles an object graph from a pickle data inputstream. Supports all
   * pickle protocol versions. Maps the python objects on the corresponding java
@@ -62,10 +64,11 @@ object Unpickler {
   objectConstructors.put("__builtin__.bytes", new ByteArrayConstructor)
   objectConstructors.put("__builtin__.set", new SetConstructor)
   objectConstructors.put("builtins.set", new SetConstructor)
-  objectConstructors.put("numpy._core.multiarray._reconstruct", new NumpyNdMultiArrayConstructor) //https://github.com/numpy/numpy/blob/main/numpy/core/multiarray.py
-  objectConstructors.put("numpy.ndarray", new NumpyNdArrayConstructor) //https://numpy.org/doc/2.2/reference/generated/numpy.ndarray.html
-  objectConstructors.put("data._reconstruct", new NumpyNdDataConstructor) //numpy.ndarray.data  https://numpy.org/doc/2.2/reference/generated/numpy.ndarray.data.html
-  objectConstructors.put("numpy.dtype", new NumpyNdArrayDTypeConstructor) //https://numpy.org/doc/2.2/reference/generated/numpy.dtype.html
+  objectConstructors
+    .put("numpy._core.multiarray._reconstruct", new NumpyNdMultiArrayConstructor) // https://github.com/numpy/numpy/blob/main/numpy/core/multiarray.py
+  objectConstructors.put("numpy.ndarray", new NumpyNdArrayConstructor) // https://numpy.org/doc/2.2/reference/generated/numpy.ndarray.html
+//  objectConstructors.put("numpy.data._reconstruct", new NumpyNdArrayConstructor) //numpy.ndarray.data  https://numpy.org/doc/2.2/reference/generated/numpy.ndarray.data.html
+  objectConstructors.put("numpy.dtype", new NumpyNdArrayDTypeConstructor) // https://numpy.org/doc/2.2/reference/generated/numpy.dtype.html
   objectConstructors.put(
     "datetime.datetime",
     new DateTimeConstructor(DateTimeConstructor.DATETIME),
@@ -123,6 +126,45 @@ class Unpickler {
     */
   protected var input: InputStream = null
 
+  private[pickle] def load_build(): Unit = {
+    val args = stack.pop
+    var target = stack.peek
+    try {
+      println(s"Unpickler load_build try to build target ${target.getClass
+          .getName} args ${args.getClass.getName}")
+      val argsArray = args.asInstanceOf[Array[AnyRef]]
+      if (argsArray(0).isInstanceOf[Array[Byte]]) {
+        val byteArray = argsArray(0).asInstanceOf[Array[Byte]]
+        println("Unpickler load_build is bytearray lenght: " + byteArray.length)
+        val arr = byteArrayToFloatArray(byteArray)
+        //        println(s"Unpickler load_build arr ${arr.mkString(",")}")
+        //        val inputStream: InputStream = new ByteArrayInputStream(byteArray)
+        //        val npArray = new Numpy(inputStream)
+        //        println(npArray.float16Elements.head)
+        //        val argsArray = argsArray.asInstanceOf[Array[AnyRef]]
+        //        target = target.getClass.getMethod("apply", classOf[Array[AnyRef]]).invoke(target, argsArray)
+      }
+      println(
+        s"Unpickler load_build args  head ${argsArray(0).getClass.getName}",
+      )
+      if (target.equals(None)) target = stack.peek
+      val setStateMethod = target.getClass
+        .getMethod("__setstate__", args.getClass)
+      val invokeResult = setStateMethod.invoke(target, args)
+      if (invokeResult != null && invokeResult.isInstanceOf[MulitNumpyNdArray])
+        println(s"Unpickler load_build target: ${target.getClass
+            .getName} __setstate__ invoke result is $invokeResult")
+        stack.pop
+        stack.add(invokeResult.asInstanceOf[MulitNumpyNdArray])
+      println(s"Unpickler load_build target: ${target.getClass
+          .getName} __setstate__ success invoke")
+    } catch {
+      case e: Exception =>
+        println(s"Error invoking __setstate__ on $target with args ${args
+            .asInstanceOf[Array[?]].mkString(",")} | error msg ${e.getMessage} ")
+        throw new PickleException("failed to __setstate__()", e)
+    }
+  }
   @throws[PickleException]
   @throws[IOException]
   def load(filePath: String): Any = {
@@ -165,7 +207,7 @@ class Unpickler {
 //            return value
       )
 
-    finally println("finally load all finish...")
+    finally println("finally load input stream all finish...")
 //      close()
 
 //  @throws[PickleException]
@@ -225,7 +267,7 @@ class Unpickler {
           break
         case Opcodes.STOP =>
           val value = stack.pop
-          println(s"try to stop all , value $value")
+          println(s"try to stop all , UnpcklerStack pop all,$key: {key} value is {value} ")
           stack.clear()
           memo.clear()
           return value
@@ -468,35 +510,35 @@ class Unpickler {
     floatArray
   }
 
-  private[pickle] def load_build(): Unit = {
-    val args = stack.pop
-    var target = stack.peek
-    try {
-      println(s"try to build target ${target.getClass.getName} args ${args.getClass.getName}")
-      val argsArray = args.asInstanceOf[Array[AnyRef]]
-      if(argsArray(0).isInstanceOf[Array[Byte]]){
-        val byteArray = argsArray(0).asInstanceOf[Array[Byte]]
-        println("is bytearray lenght: " + byteArray.length)
-        val arr = byteArrayToFloatArray(byteArray)
-        println(s"arr ${arr.mkString(",")}")
-//        val inputStream: InputStream = new ByteArrayInputStream(byteArray)
-//        val npArray = new Numpy(inputStream)
-//        println(npArray.float16Elements.head)
-//        val argsArray = argsArray.asInstanceOf[Array[AnyRef]]
-//        target = target.getClass.getMethod("apply", classOf[Array[AnyRef]]).invoke(target, argsArray)
-      }
-      println(s" args ${argsArray(0).getClass.getName}")
-      if(target.equals(None)) target = stack.peek
-      val setStateMethod = target.getClass
-        .getMethod("__setstate__", args.getClass)
-      setStateMethod.invoke(target, args)
-      println("success invoke")
-    } catch {
-      case e: Exception =>
-        println(s"Error invoking __setstate__ on $target with args $args | error msg ${e.getMessage} ")
-        throw new PickleException("failed to __setstate__()", e)
-    }
-  }
+//  private[pickle] def load_build(): Unit = {
+//    val args = stack.pop
+//    var target = stack.peek
+//    try {
+//      println(s"Unpickler load_build try to build target ${target.getClass.getName} args ${args.getClass.getName}")
+//      val argsArray = args.asInstanceOf[Array[AnyRef]]
+//      if(argsArray(0).isInstanceOf[Array[Byte]]){
+//        val byteArray = argsArray(0).asInstanceOf[Array[Byte]]
+//        println("Unpickler load_build is bytearray lenght: " + byteArray.length)
+//        val arr = byteArrayToFloatArray(byteArray)
+////        println(s"Unpickler load_build arr ${arr.mkString(",")}")
+////        val inputStream: InputStream = new ByteArrayInputStream(byteArray)
+////        val npArray = new Numpy(inputStream)
+////        println(npArray.float16Elements.head)
+////        val argsArray = argsArray.asInstanceOf[Array[AnyRef]]
+////        target = target.getClass.getMethod("apply", classOf[Array[AnyRef]]).invoke(target, argsArray)
+//      }
+//      println(s"Unpickler load_build args  head ${argsArray(0).getClass.getName}")
+//      if(target.equals(None)) target = stack.peek
+//      val setStateMethod = target.getClass
+//        .getMethod("__setstate__", args.getClass)
+//      setStateMethod.invoke(target, args)
+//      println("success invoke")
+//    } catch {
+//      case e: Exception =>
+//        println(s"Error invoking __setstate__ on $target with args ${args.asInstanceOf[Array[?]].mkString(",")} | error msg ${e.getMessage} ")
+//        throw new PickleException("failed to __setstate__()", e)
+//    }
+//  }
 
   @throws[IOException]
   private[pickle] def load_proto(): Unit = {
@@ -742,8 +784,11 @@ class Unpickler {
       case mod: Option[String] => mod.get
     }
 
-    println(s"stack module: ${stackPopModule}, name: ${name}")
+    println(s"stack module: $stackPopModule, name: $name")
     println(s"try to load global class :  $stackPopModule.$name")
+    if (name.equals("ndarray"))
+      println(s"try to load ndarray class :  $stackPopModule.$name  \r\n")
+//      val clazz = Class.forName(name)
     load_global_sub(stackPopModule, name)
 //    val module = stack.pop.asInstanceOf[String]
 //    load_global_sub(module, name)
@@ -752,7 +797,10 @@ class Unpickler {
   private[pickle] def load_global_sub(module: String, name: String): Unit = {
 
     var constructor = Unpickler.objectConstructors.get(module + "." + name).get
-    println(s"HI, try to load global sub class :  $module.$name  constructor ${constructor.getClass.getName}\r\n")
+    println(
+      s"HI, try to load global sub class :  $module.$name  constructor ${constructor
+          .getClass.getName}\r\n",
+    )
     if (constructor == null)
       // check if it is an exception
       if (module == "exceptions")
@@ -877,8 +925,17 @@ class Unpickler {
 
   private[pickle] def load_reduce(): Unit = {
     val args = stack.pop.asInstanceOf[Array[AnyRef]]
-    val constructor = stack.pop.asInstanceOf[IObjectConstructor]
-    stack.add(constructor.construct(args))
+    val popObj = stack.pop
+    popObj match {
+      case constructor: IObjectConstructor =>
+        val obj = constructor.construct(args)
+        stack.add(obj)
+      case Some(constructor: IObjectConstructor) =>
+        val obj = constructor.construct(args)
+        stack.add(obj)
+    }
+//    val constructor = stack.pop.asInstanceOf[IObjectConstructor]
+//    stack.add(constructor.construct(args))
   }
 
   private[pickle] def load_newobj(): Unit = load_reduce() // for Java we just do the same as class(*args) instead of class.__new__(class,*args)
